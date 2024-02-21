@@ -1,0 +1,212 @@
+w moim przypadku mam taka sytuacje:
+
+
+  if (!user) {
+    // Handle invalid or expired token
+    return new Response('Password reset token is invalid or has expired.', {
+      status: 400,
+    });
+  }
+
+oraz to co widzisz na zdjeciu:
+
+czyli: gdy wchodze w wygenerowany link ktory zostal wyslany na email mam: http://localhost:3000/forgot-password/ff09b6e4-a141-480b-b372-35a56fd984a6
+
+Password reset token is invalid or has expired.
+
+Co zrobic aby gdy klikne w owy link to po prostu byla informacja o tym ze na twoj email zostalo wyslane nowe haslo do twojego konta, pamietaj ze najlepiej jest zmienic owe haslo na inne w panelu uzytkownika od razu po zalogowaniu. Chodzi o to aby po nacisnieciu np w http://localhost:3000/forgot-password/ff09b6e4-a141-480b-b372-35a56fd984a6
+
+zostal wyslany email do uzytkownika wlasnie z nowym haslem ktory bedzie nowym haslem do konta uzytkownika.
+
+app\(front)\forgot-password\[token]\route.ts
+// app/api/auth/reset-password/route.ts
+import { NextRequest, NextResponse } from 'next/server'
+import bcrypt from 'bcryptjs'
+import dbConnect from '@/lib/dbConnect'
+import UserModel from '@/lib/models/UserModel'
+import { sendNewPasswordEmail } from '@/lib/mail'
+
+export const GET = async (request: NextRequest) => {
+  // Connect to the database
+  await dbConnect();
+
+  // Extract the password reset token from the URL path
+  const token = request.nextUrl.pathname.split('/').pop();
+
+  // Find the user by the password reset token and check if token is not expired
+  const user = await UserModel.findOne({
+    passwordResetToken: token,
+    passwordResetTokenExpires: { $gt: new Date() },
+  });
+
+  if (!user) {
+    // Handle invalid or expired token
+    return new Response('Password reset token is invalid or has expired.', {
+      status: 400,
+    });
+  }
+
+  // Generate a new password
+  const newPassword = 'GeneratedSecurePassword'; // Replace with actual secure password generation
+
+  // Hash the new password
+  const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+  // Save the hashed password and clear the password reset token fields
+  user.password = hashedPassword;
+  user.passwordResetToken = undefined;
+  user.passwordResetTokenExpires = undefined;
+  await user.save();
+
+  // Send the new password email
+  await sendNewPasswordEmail(user.email, newPassword);
+
+  // Return a response to the user
+  return new Response('Your new password has been sent to your email.', {
+    status: 200,
+  });
+}
+
+
+
+// app/(front)/forgot-password/ForgotPasswordForm.tsx
+'use client'
+import { useForm } from 'react-hook-form'
+import { useRouter } from 'next/navigation'
+import Link from 'next/link'
+import toast from 'react-hot-toast'
+
+type ForgotPasswordInputs = {
+  email: string;
+}
+
+const ForgotPasswordForm = () => {
+  const router = useRouter()
+
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<ForgotPasswordInputs>()
+
+  const onSubmit = async (data: ForgotPasswordInputs) => {
+    try {
+      const response = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+      });
+
+      if (!response.ok) {
+        throw new Error('There was an error sending the reset password email.');
+      }
+
+      // Show success message and possibly redirect
+      toast.success('If the email is associated with an account, a password reset email will be sent.');
+      // Optionally, redirect to the login page or a page that says 'Check your email'
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to send reset password email.');
+    }
+  }
+
+  return (
+    <div className="max-w-sm mx-auto card bg-base-300 my-4">
+      <div className="card-body">
+        <h1 className="card-title">Forgot Password</h1>
+        <form onSubmit={handleSubmit(onSubmit)}>
+          <div className="my-2">
+            <label htmlFor="email" className="label">
+              Email
+            </label>
+            <input
+              type="email"
+              id="email"
+              {...register('email', {
+                required: 'Email is required',
+                pattern: {
+                  value: /\S+@\S+\.\S+/,
+                  message: 'Entered value does not match email format',
+                },
+              })}
+              className="input input-bordered w-full max-w-xs"
+            />
+            {errors.email && <p className="text-error">{errors.email.message}</p>}
+          </div>
+          <div className="my-4">
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="btn btn-primary w-full"
+            >
+              {isSubmitting ? (
+                <span className="loading loading-spinner"></span>
+              ) : (
+                'Submit'
+              )}
+            </button>
+          </div>
+        </form>
+        <div>
+          Remembered your password?{' '}
+          <Link href="/signin">
+            <button className="link">Sign in</button>
+          </Link>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export default ForgotPasswordForm
+
+
+
+
+app\api\auth\forgot-password\route.ts
+// app/api/auth/forgot-password/route.ts
+import { NextRequest, NextResponse } from 'next/server'
+import bcrypt from 'bcryptjs'
+import dbConnect from '@/lib/dbConnect'
+import UserModel from '@/lib/models/UserModel'
+import { sendPasswordResetEmail } from '@/lib/mail'
+import { v4 as uuidv4 } from 'uuid'
+
+export const POST = async (request: NextRequest) => {
+  // Connect to the database
+  await dbConnect();
+
+  // Parse the request to get the email address
+  const { email } = await request.json();
+
+  // Find the user by email
+  const user = await UserModel.findOne({ email });
+  if (!user) {
+    // It's a good idea not to reveal whether an email is registered
+    return new Response(JSON.stringify({ message: 'If the email is associated with an account, a password reset email will be sent.' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Generate a password reset token
+  const passwordResetToken = uuidv4();
+
+  // Save the password reset token with the user record (you might want to hash it before saving)
+  user.passwordResetToken = passwordResetToken;
+  // Set a token expiration date, e.g., 1 hour from now
+  user.passwordResetTokenExpires = new Date(Date.now() + 3600000);
+  await user.save();
+
+  // Send the password reset email
+  await sendPasswordResetEmail(email, passwordResetToken);
+
+  // Return a response to the user
+  return new Response(JSON.stringify({ message: 'If the email is associated with an account, a password reset email will be sent.' }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+
