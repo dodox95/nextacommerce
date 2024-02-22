@@ -1,24 +1,25 @@
-// app/api/auth/forgot-password/route.ts
-import { NextRequest, NextResponse } from 'next/server';
-import dbConnect from '@/lib/dbConnect';
-import UserModel from '@/lib/models/UserModel';
-import { sendPasswordResetEmail } from '@/lib/mail';
-import { v4 as uuidv4 } from 'uuid';
+// app/api/auth/reset-password/route.ts
+import { NextRequest, NextResponse } from 'next/server'
+import dbConnect from '@/lib/dbConnect'
+import UserModel from '@/lib/models/UserModel'
+import { sendPasswordResetEmail } from '@/lib/mail'
+import { v4 as uuidv4 } from 'uuid'
 
-// Make sure to export the method as an uppercase named export
-export async function POST(request: NextRequest) {
+export const POST = async (request: NextRequest) => {
   await dbConnect();
 
   const { email } = await request.json();
 
   const user = await UserModel.findOne({ email });
   if (user) {
+    // Generate a unique token for password reset
     const passwordResetToken = uuidv4();
 
+    // Set the token to emailResetPassword field in the user document
     user.emailResetPassword = passwordResetToken;
-    user.passwordResetTokenExpires = new Date(Date.now() + 3600000); // 1 hour from now
     await user.save();
 
+    // Send the password reset email with the token
     await sendPasswordResetEmail(email, passwordResetToken);
 
     return new Response(JSON.stringify({ message: 'A password reset link has been sent to your email.' }), {
@@ -26,11 +27,13 @@ export async function POST(request: NextRequest) {
       headers: { 'Content-Type': 'application/json' },
     });
   } else {
+    // Respond with a generic message whether or not the email was found
+    // This is a security measure to prevent email enumeration
     return new Response(JSON.stringify({ message: 'If the email is associated with an account, a password reset link will be sent.' }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
   }
-}
+};
 
-// Note: No default export is needed or used here.
+

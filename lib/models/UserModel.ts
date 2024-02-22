@@ -1,17 +1,19 @@
 // lib/models/UserModel.ts
-import mongoose from 'mongoose';
+import mongoose, { Document, Model } from 'mongoose';
 
-export type User = {
-  _id: string;
+// TypeScript interface to define the User properties
+export interface IUser extends Document {
   name: string;
   email: string;
   password: string;
   isActive: boolean;
   emailToken: string | null;
   isAdmin: boolean;
-  emailResetPassword: string | null;  
+  emailResetPassword: string | null;
+  passwordResetTokenExpires: Date | null; // Field for token expiration
 }
 
+// Mongoose schema definition for the User
 const UserSchema = new mongoose.Schema({
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true },
@@ -19,9 +21,11 @@ const UserSchema = new mongoose.Schema({
   isActive: { type: Boolean, required: true, default: false },
   emailToken: { type: String, default: null },
   isAdmin: { type: Boolean, required: true, default: false },
-  emailResetPassword: { type: String, default: null }, 
+  emailResetPassword: { type: String, default: null },
+  passwordResetTokenExpires: { type: Date, default: null }, // Field for token expiration
 }, { timestamps: true });
 
-const UserModel = mongoose.models.User || mongoose.model('User', UserSchema);
+// Mongoose model creation
+const UserModel: Model<IUser> = mongoose.models.User || mongoose.model<IUser>('User', UserSchema);
 
 export default UserModel;

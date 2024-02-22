@@ -1,50 +1,54 @@
-// app/(front)/reset-password/[token]/route.ts
-import { NextRequest, NextResponse } from 'next/server';
+// app\(front)\reset-password\[token]\route.ts
 import bcrypt from 'bcryptjs';
 import dbConnect from '@/lib/dbConnect';
 import UserModel from '@/lib/models/UserModel';
 import { sendNewPasswordEmail } from '@/lib/mail';
 import { randomBytes } from 'crypto';
 
-export async function get(request: NextRequest) {
-  // Connect to the database
-  await dbConnect();
-
-  // Extract the token from the URL path
+export const GET = async (request: NextRequest) => {
   const token = request.nextUrl.pathname.split('/').pop();
-
+  await dbConnect();
+  
   // Find the user by the emailResetPassword token and check if the token has not expired
   const user = await UserModel.findOne({
     emailResetPassword: token,
-    passwordResetTokenExpires: { $gt: new Date() },
+    $or: [
+      { passwordResetTokenExpires: { $gt: new Date() } },
+      { passwordResetTokenExpires: null },
+    ],
   });
+  console.log(`Token: ${token}`);
+  console.log(`Current Time: ${new Date()}`);
+  console.log(`Token Expiry: ${user.passwordResetTokenExpires}`);
+  console.log(`Current Time Expiry: ${new Date()}`);
 
-  if (!user) {
-    // Handle the case where the token is invalid or has expired
+  
+  if (user) {
+    // If the user is found, generate a new secure password
+    const newPassword = generateSecurePassword();
+
+    // Hash the new password before saving it to the database
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Update the user's password and clear the reset token and its expiry
+    user.password = hashedPassword;
+    user.emailResetPassword = null;
+    user.passwordResetTokenExpires = undefined;
+    await user.save();
+
+    // Send the new password to the user's email
+    await sendNewPasswordEmail(user.email, newPassword);
+
+    // Return a response indicating the new password has been sent
+    return new Response('Your new password has been sent to your email.', {
+      status: 200,
+    });
+  } else {
+    // If no user is found or the token is expired, return an error response
     return new Response('Password reset token is invalid or has expired.', {
       status: 400,
     });
   }
-
-  // Generate a new secure password
-  const newPassword = generateSecurePassword();
-
-  // Hash the new password
-  const hashedPassword = await bcrypt.hash(newPassword, 10);
-
-  // Update the user's password, reset the emailResetPassword token and its expiry
-  user.password = hashedPassword;
-  user.emailResetPassword = null; // Clear the token after successful reset
-  user.passwordResetTokenExpires = undefined; // Clear the expiry
-  await user.save();
-
-  // Send the new password to the user's email
-  await sendNewPasswordEmail(user.email, newPassword);
-
-  // Return a success response
-  return new Response('Your new password has been sent to your email.', {
-    status: 200,
-  });
 }
 
 // Helper function to generate a secure password
